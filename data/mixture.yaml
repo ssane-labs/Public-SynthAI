@@ -1,0 +1,167 @@
+# Корпус Synth-1. Доли — по токенам, не по документам и не по байтам.
+#
+# Все источники проверены на Hub: репозиторий, путь к шардам и поле текста здесь
+# такие, какими их отдаёт Hub на самом деле, а не какими их описывает карточка
+# датасета. Проверить после любой правки:
+#
+#     py -3 data/sources.py smoke
+#
+# Отличия от Synth-2: русского нет вовсе (модель только английская), кода и
+# математики меньше, и появились сырые веб-страницы из корпуса OpenResearcher —
+# того самого, по которому модель потом будет искать на этапе D.
+
+# paths — шаблоны путей к parquet внутри репозитория. Читаем шарды напрямую по
+# HTTP Range (data/stream.py), поэтому нужен путь, а не имя конфига datasets.
+
+sources:
+  fineweb-edu:
+    repo: HuggingFaceFW/fineweb-edu
+    paths: ["sample/100BT/*.parquet"]
+    field: text
+    lang: en
+    note: основной веб. Отфильтрован классификатором образовательной ценности.
+
+  fineweb-edu-small:
+    repo: HuggingFaceFW/fineweb-edu
+    paths: ["sample/10BT/*.parquet"]
+    field: text
+    lang: en
+    note: то же самое, но меньше. Для абляций и отладки пайплайна.
+
+  cosmopedia:
+    repo: HuggingFaceTB/smollm-corpus
+    paths: ["cosmopedia-v2/*.parquet"]
+    field: text
+    lang: en
+    note: синтетические учебные тексты. Дорогая на токен, но плотная по знанию.
+
+  # Рабочий корпус кода. Выбран вместо github-code-clean: там 38% файлов под
+  # copyleft, а группы строк в десять раз крупнее — см. LICENSES.md.
+  starcoder:
+    repo: bigcode/starcoderdata
+    paths:
+      - "python/*.parquet"
+      - "javascript/*.parquet"
+      - "typescript/*.parquet"
+      - "java/*.parquet"
+      - "c/*.parquet"
+      - "cpp/*.parquet"
+      - "go/*.parquet"
+      - "rust/*.parquet"
+      - "sql/*.parquet"
+      - "shell/*.parquet"
+      - "markdown/*.parquet"
+    field: content
+    meta: [max_stars_repo_path]
+    lang: code
+    note: >
+      В content вшиты служебные метки StarCoder (<reponame>, <filename>,
+      <gh_stars>) — под их токенизатор, не под наш. Срезаются в data/filters.py.
+
+  # Запасной корпус кода: содержит copyleft, поэтому применяется license-фильтр
+  # и остаётся ~61% файлов. Держим на случай, если доступ к starcoderdata отзовут.
+  github-code:
+    repo: codeparrot/github-code-clean
+    paths: ["data/*.parquet"]
+    field: code
+    meta: [path, language, repo_name, license]
+    lang: code-licensed
+
+  finemath:
+    repo: HuggingFaceTB/finemath
+    paths: ["finemath-4plus/*.parquet"]
+    field: text
+    lang: en
+    note: математика с веба, верхний порог качества. Шаблонная — см. evals/ablations.md.
+
+  infiwebmath:
+    repo: HuggingFaceTB/finemath
+    paths: ["infiwebmath-4plus/*.parquet"]
+    field: text
+    lang: en
+
+  # Страницы, по которым собраны траектории поиска OpenResearcher (~11B токенов,
+  # 14.9M документов, ODC-By). Здесь они — обычный претрейн-текст: модель
+  # заранее видит веб таким, каким его отдаёт браузер, а не только вычищенный
+  # fineweb. Тот же корпус на этапе D служит офлайн-поисковиком.
+  #
+  # Проверить до первого прогона: размер групп строк (первый шард — 820 МБ,
+  # остальные ~300) и пересечение с бенчмарками поиска — корпус собирался под
+  # BrowseComp-Plus, и ответы на его вопросы в нём лежат.
+  openresearcher-web:
+    repo: OpenResearcher/OpenResearcher-Corpus
+    paths: ["data/*.parquet"]
+    field: text
+    meta: [url]
+    lang: en
+
+# --- Смеси по этапам -------------------------------------------------------
+# Кода и математики меньше, чем у Synth-2 (там 29%): для модели на 159M
+# активных параметров это много, а поисковой нужны чтение и язык. Обоснование —
+# PLAN.md, раздел 5.
+
+mixtures:
+
+  # Этап B. Основная масса бюджета.
+  pretrain:
+    fineweb-edu: 0.65
+    cosmopedia: 0.12
+    starcoder: 0.10
+    finemath: 0.06
+    infiwebmath: 0.02
+    openresearcher-web: 0.05
+
+  # Этап C. Отжиг: качество выше, доля страниц выше — ради этапа D.
+  anneal:
+    fineweb-edu: 0.40
+    cosmopedia: 0.20
+    starcoder: 0.12
+    finemath: 0.10
+    infiwebmath: 0.03
+    openresearcher-web: 0.15
+
+  # Обучение токенизатора. Страниц больше, чем в претрейне: адреса, заголовки и
+  # навигационный мусор выдачи должны резаться разумно, а доля merges под них
+  # определяется здесь и потом уже не меняется.
+  #
+  # Код для словаря берётся из github-code, а не из starcoder: starcoderdata
+  # закрыт условиями и без HF_TOKEN не читается, а словарь собирается на машине
+  # без токена (13.09.2026). Словарю нужны частоты, а не лицензии; copyleft
+  # отсекается keep_licensed_code всё равно.
+  tokenizer:
+    fineweb-edu-small: 0.60
+    github-code: 0.15
+    finemath: 0.08
+    cosmopedia: 0.05
+    openresearcher-web: 0.12
+
+  # Отладка на ноутбуке: всё маленькое, ничего не gated.
+  debug:
+    fineweb-edu-small: 1.00
+
+  # Проверка пайплайна целиком: проза, код и сырые страницы разом. Код здесь
+  # ради фильтра из data/filters.py — на нём он и проверяется.
+  smoke:
+    fineweb-edu-small: 0.50
+    starcoder: 0.30
+    openresearcher-web: 0.20
+
+# --- Фильтр личности -------------------------------------------------------
+# Документы, где чужой ассистент представляется, выбрасываются из претрейна.
+# Иначе Synth-1 нахватается чужой личности задолго до этапа G, и мы получим ту
+# же проблему, что была с MiniCPM в прототипе: перебивать вместо того, чтобы
+# ставить с чистого листа.
+identity_filter:
+  patterns:
+    - "as an AI language model"
+    - "as a large language model"
+    - "I'm Claude, an AI assistant"
+    - "I am ChatGPT"
+    - "I'm ChatGPT"
+    - "trained by OpenAI"
+    - "developed by OpenAI"
+    - "I am Gemini"
+    - "Anthropic's Claude"
+  # Проверяется без учёта регистра. Документ выбрасывается целиком: обрезать
+  # абзац дешевле, но тогда остаётся контекст вокруг, а он и есть носитель.
+  case_sensitive: false

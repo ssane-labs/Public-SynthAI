@@ -1,0 +1,12 @@
+# Локально (Windows) — только подготовка данных и токенизатор.
+# JAX на TPU ставится в ноутбуке Kaggle, здесь его нет и не должно быть.
+
+tokenizers>=0.20
+datasets>=3.0
+huggingface_hub>=0.26
+safetensors>=0.4
+zstandard>=0.22
+pyyaml>=6.0
+numpy>=1.26
+regex>=2024.5
+tqdm>=4.66

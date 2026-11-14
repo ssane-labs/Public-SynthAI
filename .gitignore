@@ -1,0 +1,28 @@
+# Секреты
+.env
+
+# Данные и веса — всё это живёт на HF Hub, а не в git
+data/sample/
+data/cache/
+# Токенизатор — исключение: 4 МБ, но это ключевой артефакт проекта.
+# Kaggle клонирует репозиторий, и словарь должен приезжать вместе с кодом.
+!tokenizer/out/synth1.json
+checkpoints/
+runs/
+evals/out/
+*.bin
+*.npy
+*.safetensors
+*.gz
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Прочее
+.ipynb_checkpoints/
+.DS_Store
+/cache/
